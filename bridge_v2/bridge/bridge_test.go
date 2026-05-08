@@ -38,7 +38,7 @@ func newTestSession() *ClientSession {
 		clientConn:      cc,
 		clientReader:    bufio.NewReader(cc),
 		elkoDone:        make(chan struct{}),
-		elkoSendChan:    make(chan *ElkoMessage, MaxClientMessages),
+		elkoSendChan:    make(chan *outboundElkoMessage, MaxClientMessages),
 		firstConnection: true,
 		objects:         make(map[uint8]*ElkoMessage),
 		done:            make(chan struct{}),

@@ -37,6 +37,12 @@ const MaxClientMessages = 500
 
 var ElkoMsgTerminator = []byte("\n\n")
 
+type outboundElkoMessage struct {
+	msg       *ElkoMessage
+	rawJSON   []byte
+	writeDone chan error
+}
+
 type habiproxyHatcheryStateMessage struct {
 	To      string `json:"to"`
 	Op      string `json:"op"`
@@ -86,8 +92,7 @@ type ClientSession struct {
 	elkoConnInitWg    sync.WaitGroup
 	elkoDone          chan struct{}
 	elkoDoneClosed    bool
-	elkoSendChan      chan *ElkoMessage
-	elkoWriteMu       sync.Mutex
+	elkoSendChan      chan *outboundElkoMessage
 	elkoWg            sync.WaitGroup
 	firstConnection   bool
 	hatcheryPending   bool
@@ -244,7 +249,7 @@ func (c *ClientSession) elkoWriter() {
 	c.elkoConnInitWg.Done()
 	for {
 		select {
-		case msg := <-c.elkoSendChan:
+		case outbound := <-c.elkoSendChan:
 			// Per-message child span. Ends immediately after the write
 			// completes — we don't try to correlate with the reply at the
 			// moment because the Elko reply path is broadcast/private/reply
@@ -252,8 +257,9 @@ func (c *ClientSession) elkoWriter() {
 			// state. Latency of the write itself is captured in the span
 			// duration plus the bridge_v2.elko.round_trip.seconds histogram
 			// recorded inline.
+			msg := outbound.msg
 			op := ""
-			if msg.Op != nil {
+			if msg != nil && msg.Op != nil {
 				op = *msg.Op
 			}
 			sendCtx, span := observability.Tracer.Start(
@@ -261,20 +267,30 @@ func (c *ClientSession) elkoWriter() {
 				trace.WithAttributes(observability.OpAttr(op)),
 			)
 			start := time.Now()
-			msgBytes, err := json.Marshal(msg)
-			if err != nil {
-				c.log.Error().Err(err).Interface("msg", msg).Msg("Error marshalling Elko message")
-				span.RecordError(err)
-				span.End()
-				continue
+			var msgBytes []byte
+			var err error
+			if outbound.rawJSON != nil {
+				msgBytes = append(msgBytes, outbound.rawJSON...)
+			} else {
+				msgBytes, err = json.Marshal(msg)
+				if err != nil {
+					c.log.Error().Err(err).Interface("msg", msg).Msg("Error marshalling Elko message")
+					span.RecordError(err)
+					span.End()
+					if outbound.writeDone != nil {
+						outbound.writeDone <- err
+					}
+					continue
+				}
 			}
 			if c.log.Trace().Enabled() {
 				c.log.Trace().Msgf("->ELKO: %s", string(msgBytes))
 			}
 			msgBytes = append(msgBytes, ElkoMsgTerminator...)
-			c.elkoWriteMu.Lock()
 			_, err = c.elkoConn.Write(msgBytes)
-			c.elkoWriteMu.Unlock()
+			if outbound.writeDone != nil {
+				outbound.writeDone <- err
+			}
 			if err != nil {
 				c.log.Error().Err(err).Str("raw", string(msgBytes)).Msg("Error writing Elko message")
 				span.RecordError(err)
@@ -1364,19 +1380,31 @@ func (c *ClientSession) runJsonPassthrough() {
 	}
 }
 
-// sendRawToElko writes a raw JSON line to the Elko connection followed
-// by the \n\n message terminator. Safe in JSON passthrough mode because
-// nothing else writes to elkoConn — we skip the elkoWriter goroutine's
-// channel path entirely.
+// sendRawToElko queues a raw JSON line for elkoWriter to frame and write.
+// This preserves JSON-passthrough fields that ElkoMessage does not model
+// while keeping elkoWriter as the only goroutine that writes to elkoConn.
 func (c *ClientSession) sendRawToElko(line []byte) error {
-	packet := make([]byte, 0, len(line)+2)
-	packet = append(packet, line...)
-	packet = append(packet, ElkoMsgTerminator...)
-	observability.IncMessagesOut(c.ctx, observability.PeerAttr("elko"))
-	c.elkoWriteMu.Lock()
-	defer c.elkoWriteMu.Unlock()
-	_, err := c.elkoConn.Write(packet)
-	return err
+	raw := append([]byte(nil), line...)
+	writeDone := make(chan error, 1)
+	msg := &outboundElkoMessage{
+		rawJSON:   raw,
+		writeDone: writeDone,
+	}
+	select {
+	case c.elkoSendChan <- msg:
+	case <-c.elkoDone:
+		return fmt.Errorf("elko writer closed")
+	case <-c.done:
+		return fmt.Errorf("client session closed")
+	}
+	select {
+	case err := <-writeDone:
+		return err
+	case <-c.elkoDone:
+		return fmt.Errorf("elko writer closed before raw message was written")
+	case <-c.done:
+		return fmt.Errorf("client session closed before raw message was written")
+	}
 }
 
 func (c *ClientSession) sendHatcheryStateToHabiproxy(state string) error {
@@ -1749,7 +1777,7 @@ func (c *ClientSession) handleClientMessage(data []byte) {
 		}
 	}
 
-	c.elkoSendChan <- elkoMsg
+	c.elkoSendChan <- &outboundElkoMessage{msg: elkoMsg}
 }
 
 func (c *ClientSession) enterContext(context string) {
@@ -1760,7 +1788,7 @@ func (c *ClientSession) enterContext(context string) {
 		Context: &context,
 		User:    &c.userRef,
 	}
-	c.elkoSendChan <- enterContextMsg
+	c.elkoSendChan <- &outboundElkoMessage{msg: enterContextMsg}
 	if len(context) == 0 {
 		c.replySeq = PHANTOM_REQUEST
 	}
@@ -2029,7 +2057,7 @@ func NewClientSession(b *Bridge, c *ClientConnection) *ClientSession {
 		ctx:                      sessionCtx,
 		span:                     span,
 		elkoDone:                 make(chan struct{}),
-		elkoSendChan:             make(chan *ElkoMessage, MaxClientMessages),
+		elkoSendChan:             make(chan *outboundElkoMessage, MaxClientMessages),
 		firstConnection:          true,
 		log:                      sessionLogger,
 		sessionID:                id,
@@ -2144,7 +2172,7 @@ func RestoreSession(b *Bridge, snap *SessionSnapshot, clientConn net.Conn, elkoC
 		done:                     make(chan struct{}),
 		elkoConn:                 elkoConn,
 		elkoDone:                 make(chan struct{}),
-		elkoSendChan:             make(chan *ElkoMessage, MaxClientMessages),
+		elkoSendChan:             make(chan *outboundElkoMessage, MaxClientMessages),
 		snapshotReq:              make(chan chan *SessionSnapshot, 1),
 		firstConnection:          snap.FirstConnection,
 		hatcheryPending:          snap.HatcheryPending,
