@@ -19,6 +19,65 @@ The embedded emulator page uses a bootstrap event stream before it knows which a
 6. For hatchery avatars, bridge/habiproxy emits `HATCHERY_STARTED` and `HATCHERY_COMPLETED`; the SSE route forwards those only when the event avatar matches the tab's recorded avatar name.
 7. After `AVATAR_READY` or `HATCHERY_COMPLETED`, the browser closes `HatcheryES` and opens the normal avatar-specific event stream.
 
+## Sequence Diagram
+
+```
+Browser Tab                pushserver              websocketProxy    habiproxy       bridge_v2        Elko
+    |                          |                         |               |                |              |
+    |-- GET / --------------->|                         |               |                |              |
+    |<-- emulator.ejs          |                         |               |                |              |
+    |    (DocentSessionId)     |                         |               |                |              |
+    |                          |                         |               |                |              |
+    |-- GET /events/hatchery/  |                         |               |                |              |
+    |   eventStream?docent=X ->|                         |               |                |              |
+    |<-- SSE stream open ----  |                         |               |                |              |
+    |                          |                         |               |                |              |
+    |-- WS connect (cookie X)->|                         |               |                |              |
+    |                          |-- proxy WS ----------->|               |                |              |
+    |                          |                         |               |                |              |
+    |-- Habilink preamble      |                         |               |                |              |
+    |   {"name":"Alice"} ----->|                         |               |                |              |
+    |                          |-- forward bytes ------->|               |                |              |
+    |                          |                  record X -> Alice      |                |              |
+    |                          |                         |-- forward --->|                |              |
+    |                          |                         |               |-- entercontext>|              |
+    |                          |                         |               |                |-- to Elko -->|
+    |                          |                         |               |                |              |
+    |                          |   [NEW USER: hatchery path]             |                |              |
+    |                          |                         |               |                |<- no avatar -|
+    |                          |                         |               |<- HATCHERY_    |              |
+    |                          |                         |               |   STATE started|              |
+    |                          |                         |<- habiproxy   |                |              |
+    |                          |                         |   hatchery    |                |              |
+    |                          |                         |   callback    |                |              |
+    |                          |  docentMatchesAvatar(X, Alice)?         |                |              |
+    |<-- HATCHERY_STARTED ----|                         |               |                |              |
+    |    (iframe -> HATCHERY   |                         |               |                |              |
+    |     doc)                 |                         |               |                |              |
+    |                          |                         |               |                |              |
+    |-- CUSTOMIZE (spacebar) ->|                         |               |                |              |
+    |                          |                         |-- forward --->|                |              |
+    |                          |                         |               |-- forward ---->|              |
+    |                          |                         |               |<- HATCHERY_    |              |
+    |                          |                         |               |   STATE comp.  |              |
+    |<-- HATCHERY_COMPLETED --|                         |               |                |              |
+    |    trackAvatar(Alice)    |                         |               |                |              |
+    |    close HatcheryES      |                         |               |                |              |
+    |                          |                         |               |                |              |
+    |-- GET /events/Alice/     |                         |               |                |              |
+    |   eventStream ---------->|                         |               |                |              |
+    |<-- normal docent SSE ---|                         |               |                |              |
+    |                          |                         |               |                |              |
+    |          [EXISTING USER: AVATAR_READY path]        |               |                |              |
+    |                          |                         |               |<- make you:true|              |
+    |                          |                         |               | sessionReady   |              |
+    |                          |  docentTracker emits    |               |                |              |
+    |                          |  AVATAR_READY for X     |               |                |              |
+    |<-- AVATAR_READY --------|                         |               |                |              |
+    |    trackAvatar(Alice)    |                         |               |                |              |
+    |    close HatcheryES      |                         |               |                |              |
+```
+
 ## Race Behavior
 
 - If tab A waits at the disk/title screen while tab B logs in completely, tab A has no matching `DocentSessionId -> avatarName` for tab B, so tab A receives no activation event.
