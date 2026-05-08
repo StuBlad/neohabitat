@@ -126,7 +126,7 @@ function testHatcheryCompletionStillEmits() {
   });
 }
 
-function testHatcheryPathDoesNotAlsoEmitAvatarReady() {
+function testHatcheryPathEmitsAvatarReadyWhenSessionIsReady() {
   const habiproxy = new FakeHabiproxy();
   const {res} = openHatcheryStream(habiproxy);
 
@@ -144,8 +144,9 @@ function testHatcheryPathDoesNotAlsoEmitAvatarReady() {
   });
 
   assert.strictEqual(parseEvent(res.writes[2]).type, 'HATCHERY_STARTED');
-  assert.strictEqual(parseEvent(res.writes[3]).type, 'HATCHERY_COMPLETED');
-  assert.strictEqual(res.writes.length, 4);
+  assert.strictEqual(parseEvent(res.writes[3]).type, 'AVATAR_READY');
+  assert.strictEqual(parseEvent(res.writes[4]).type, 'HATCHERY_COMPLETED');
+  assert.strictEqual(res.writes.length, 5);
 }
 
 function testCloseRemovesBootstrapListeners() {
@@ -169,5 +170,5 @@ testSessionReadyEmitsAvatarReady();
 testSessionReadyIgnoresUnknownAvatar();
 testSessionReadyIgnoresOtherDocentAvatar();
 testHatcheryCompletionStillEmits();
-testHatcheryPathDoesNotAlsoEmitAvatarReady();
+testHatcheryPathEmitsAvatarReadyWhenSessionIsReady();
 testCloseRemovesBootstrapListeners();
