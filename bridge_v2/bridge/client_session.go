@@ -1029,9 +1029,6 @@ func (c *ClientSession) ensureUserCreated(fullName string) (err error) {
 		}
 		if c.bridge.OriginalHatchery && !c.jsonPassthrough {
 			c.hatcheryPending = true
-			if stateErr := c.sendHatcheryStateToHabiproxy("started"); stateErr != nil {
-				c.log.Error().Err(stateErr).Str("user_ref", c.userRef).Msg("Could not notify habiproxy that original hatchery started")
-			}
 			c.log.Info().Str("user_ref", c.userRef).Msg("User has no avatar; starting original hatchery flow")
 			return
 		}
@@ -1577,6 +1574,9 @@ func (c *ClientSession) handleInitialClientMessage(data []byte) {
 func (c *ClientSession) sendImAliveReply() error {
 	aliveReply := NewHabBuf(true, true, PHANTOM_REQUEST, REGION_NOID, uint8(IM_ALIVE))
 	if c.hatcheryPending {
+		if stateErr := c.sendHatcheryStateToHabiproxy("started"); stateErr != nil {
+			c.log.Error().Err(stateErr).Str("user_ref", c.userRef).Msg("Could not notify habiproxy that original hatchery started")
+		}
 		aliveReply.AddInt(2)
 		aliveReply.AddIntSlice(NewHatcheryCustomizationVector())
 		return c.SendBuf(aliveReply, true)

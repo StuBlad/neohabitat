@@ -12,8 +12,8 @@ services:
       dockerfile: Dockerfile.dev
     command: ["air"]
     environment:
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
       OTEL_SERVICE_NAME: "bridge_v2"
+      NEOHABITAT_ORIGINAL_HATCHERY: "true"
     volumes:
       - ./bridge_v2:/app
     ports:
