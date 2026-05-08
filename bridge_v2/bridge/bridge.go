@@ -80,13 +80,7 @@ func (b *Bridge) Run() {
 	b.wg.Add(1)
 	defer b.wg.Done()
 	var err error
-	// Custom BSON registry that tolerates negative ints in *uint8 fields.
-	// Java-era writes persisted byte-cast ints with the sign bit set
-	// (e.g. mods.0.y = -2 for what the wire treats as 254); the default
-	// uint8 decoder rejects those and ensureUserCreated bails. See
-	// bson_codec.go for the full reasoning.
-	b.MongoClient, err = mongo.NewClient(
-		options.Client().ApplyURI(b.mongoURL).SetRegistry(looseRegistry()))
+	b.MongoClient, err = mongo.NewClient(options.Client().ApplyURI(b.mongoURL))
 	if err != nil {
 		log.Fatal().Msgf("Could not initialize Mongo client at URL %s: %v", b.mongoURL, err)
 		return
