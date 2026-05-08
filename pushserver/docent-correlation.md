@@ -16,8 +16,8 @@ The embedded emulator page uses a bootstrap event stream before it knows which a
 3. The emulator opens the websocket proxy; the request includes the `docentSessionId` cookie.
 4. The websocket proxy buffers early client bytes only for detection, forwards all bytes unchanged, and records `DocentSessionId -> avatarName` when it sees the Habilink `"name"` preamble.
 5. For existing avatars, habiproxy emits `sessionReady`; `docentTracker` emits `AVATAR_READY` only to the matching `DocentSessionId`.
-6. For hatchery avatars, bridge/habiproxy emits `HATCHERY_STARTED` and `HATCHERY_COMPLETED`; the SSE route forwards those only when the event avatar matches the tab's recorded avatar name.
-7. After `AVATAR_READY` or `HATCHERY_COMPLETED`, the browser closes `HatcheryES` and opens the normal avatar-specific event stream.
+6. For hatchery avatars, bridge/habiproxy emits `HATCHERY_STARTED` (iframe switches to hatchery doc) and `HATCHERY_COMPLETED`; after completion habiproxy also emits `sessionReady`, which produces an `AVATAR_READY` event.
+7. `AVATAR_READY` is the single activation signal for both paths — the browser closes `HatcheryES` and opens the normal avatar-specific event stream only on `AVATAR_READY`.
 
 ## Sequence Diagram
 
@@ -61,6 +61,13 @@ Browser Tab                pushserver              websocketProxy    habiproxy  
     |                          |                         |               |<- HATCHERY_    |              |
     |                          |                         |               |   STATE comp.  |              |
     |<-- HATCHERY_COMPLETED --|                         |               |                |              |
+    |    (iframe stays on      |                         |               |                |              |
+    |     hatchery doc)        |                         |               |                |              |
+    |                          |                         |               |<- make you:true|              |
+    |                          |                         |               | (sessionReady) |              |
+    |                          |  docentTracker emits    |               |                |              |
+    |                          |  AVATAR_READY for X     |               |                |              |
+    |<-- AVATAR_READY --------|                         |               |                |              |
     |    trackAvatar(Alice)    |                         |               |                |              |
     |    close HatcheryES      |                         |               |                |              |
     |                          |                         |               |                |              |
@@ -70,12 +77,16 @@ Browser Tab                pushserver              websocketProxy    habiproxy  
     |                          |                         |               |                |              |
     |          [EXISTING USER: AVATAR_READY path]        |               |                |              |
     |                          |                         |               |<- make you:true|              |
-    |                          |                         |               | sessionReady   |              |
+    |                          |                         |               | (sessionReady) |              |
     |                          |  docentTracker emits    |               |                |              |
     |                          |  AVATAR_READY for X     |               |                |              |
     |<-- AVATAR_READY --------|                         |               |                |              |
     |    trackAvatar(Alice)    |                         |               |                |              |
     |    close HatcheryES      |                         |               |                |              |
+    |                          |                         |               |                |              |
+    |-- GET /events/Alice/     |                         |               |                |              |
+    |   eventStream ---------->|                         |               |                |              |
+    |<-- normal docent SSE ---|                         |               |                |              |
 ```
 
 ## Race Behavior
@@ -83,7 +94,7 @@ Browser Tab                pushserver              websocketProxy    habiproxy  
 - If tab A waits at the disk/title screen while tab B logs in completely, tab A has no matching `DocentSessionId -> avatarName` for tab B, so tab A receives no activation event.
 - If tab A has entered its name but has not entered the world, only events matching that same avatar name can activate tab A.
 - Bot sessions such as ElizaBot and WelcomeBot do not activate a human tab unless that tab's websocket preamble used that same avatar name.
-- The hatchery path and existing-avatar path are separate: hatchery tabs use `HATCHERY_STARTED`/`HATCHERY_COMPLETED`; once marked as hatchery, the tab suppresses `AVATAR_READY` for the later `sessionReady`.
+- `AVATAR_READY` is the single docent activation signal for both paths. `HATCHERY_STARTED` switches the iframe to the hatchery doc; `HATCHERY_COMPLETED` is informational only. The tab activates when habiproxy confirms `sessionReady` — guaranteeing the avatar event stream is ready to serve.
 
 ## Remaining Limitation
 
