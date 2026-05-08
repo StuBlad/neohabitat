@@ -36,7 +36,6 @@ func TestLooseRegistry_NegativeUint8(t *testing.T) {
 		{"int64-negative", bson.M{"y": int64(-2)}, 254},
 		{"double-negative", bson.M{"y": float64(-2.0)}, 254},
 		{"double-positive", bson.M{"y": float64(140.0)}, 140},
-		{"null-becomes-zero", bson.M{"y": nil}, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -55,6 +54,30 @@ func TestLooseRegistry_NegativeUint8(t *testing.T) {
 				t.Errorf("Y = %d; want %d", *got.Y, tc.want)
 			}
 		})
+	}
+}
+
+// TestLooseRegistry_NullStaysNil confirms what the comment in
+// bson_codec.go promises: BSON null in a *uint8 field is intercepted
+// by the pointer codec and leaves the pointer nil — our element
+// decoder never sees it. If a future driver upgrade changes that
+// contract, this test catches the regression so we know to teach
+// decodeLooseUint8 about Null.
+func TestLooseRegistry_NullStaysNil(t *testing.T) {
+	reg := looseRegistry()
+	type modShim struct {
+		Y *uint8 `bson:"y"`
+	}
+	raw, err := bson.MarshalWithRegistry(reg, bson.M{"y": nil})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var got modShim
+	if err := bson.UnmarshalWithRegistry(reg, raw, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got.Y != nil {
+		t.Errorf("Y = %d; want nil", *got.Y)
 	}
 }
 

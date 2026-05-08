@@ -34,10 +34,10 @@ var uint8Type = reflect.TypeOf(uint8(0))
 // (>255 or >127 stuffed into a Java int field) likewise mask to their
 // low 8 bits — the upper bits were never meaningful for a uint8 field.
 //
-// The decoder also accepts BSON Double (some Java writers emit
-// floating-point) and Null (treated as zero — same as the default
-// behavior for a missing optional field that's been explicitly set
-// to null, which we've seen in older mods).
+// Only Int32 / Int64 / Double are handled here. Null and Undefined are
+// intercepted by the pointer codec for *uint8 fields (the only uint8
+// shape in our schema) and never reach this decoder, so handling them
+// here would be dead code.
 func decodeLooseUint8(dc bsoncodec.DecodeContext, vr bsonrw.ValueReader, val reflect.Value) error {
 	if !val.CanSet() || val.Kind() != reflect.Uint8 {
 		return bsoncodec.ValueDecoderError{
@@ -66,26 +66,6 @@ func decodeLooseUint8(dc bsoncodec.DecodeContext, vr bsonrw.ValueReader, val ref
 			return err
 		}
 		n = int64(f)
-	case bsontype.Null:
-		if err := vr.ReadNull(); err != nil {
-			return err
-		}
-		n = 0
-	case bsontype.Undefined:
-		if err := vr.ReadUndefined(); err != nil {
-			return err
-		}
-		n = 0
-	case bsontype.Boolean:
-		// Defensive: some old docs have {"open": false} where the schema
-		// expected a uint8. Map false→0, true→1.
-		b, err := vr.ReadBoolean()
-		if err != nil {
-			return err
-		}
-		if b {
-			n = 1
-		}
 	default:
 		return fmt.Errorf("decodeLooseUint8: unexpected BSON type %v", vr.Type())
 	}
