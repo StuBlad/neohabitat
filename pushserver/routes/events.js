@@ -184,9 +184,8 @@ class EventRoutes {
       var avatarName = req.params.avatarName;
 
       if (!(avatarName in self.habiproxy.sessions)) {
-        var err = new Error('Avatar unknown.');
-        err.status = 404;
-        next(err);
+        log.debug('EventStream requested for unknown Avatar: %s', avatarName);
+        res.status(204).end();
         return;
       }
 

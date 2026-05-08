@@ -54,8 +54,7 @@ class DocentTracker extends EventEmitter {
     var docentSessionIds = Object.keys(this.docentAvatars);
     for (var i in docentSessionIds) {
       var docentSessionId = docentSessionIds[i];
-      if (!this.isHatcheryDocent(docentSessionId) &&
-          this.docentMatchesAvatar(docentSessionId, session.avatarName)) {
+      if (this.docentMatchesAvatar(docentSessionId, session.avatarName)) {
         this.emit('avatarReady', docentSessionId, session.avatarName);
       }
     }

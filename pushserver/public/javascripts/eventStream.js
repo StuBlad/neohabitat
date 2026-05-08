@@ -36,10 +36,6 @@ function processEvent(event) {
       $('#docsFrame').attr('src', OriginalHatcheryDoc);
       return;
     case HATCHERY_COMPLETED:
-      if (event.msg.avatar && typeof trackAvatar === 'function') {
-        trackAvatar(event.msg.avatar);
-        stopHatcheryEventSource();
-      }
       return;
     case AVATAR_READY:
       if (event.msg.avatar && typeof trackAvatar === 'function') {
@@ -109,12 +105,11 @@ function startHatcheryEventSource() {
 
 function startEventSource() {
   if (HabiventsES == null || HabiventsES.readyState == 2) {
-    HabiventsES = new EventSource('/events/'+AvatarName+'/eventStream');
+    HabiventsES = new EventSource('/events/'+encodeURIComponent(AvatarName)+'/eventStream');
     HabiventsES.onerror = function(e) {
-      if (HabiventsES.readyState == 2) {
-        console.log('Habivents EventSource disconnected, retrying in 3 secs:', e);
-        setTimeout(startEventSource, 3000);
-      }
+      console.log('Habivents EventSource disconnected:', e);
+      HabiventsES.close();
+      HabiventsES = null;
     }
     HabiventsES.addEventListener('message', function(e) {
       var event = JSON.parse(e.data);
