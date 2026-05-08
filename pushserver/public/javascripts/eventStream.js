@@ -1,4 +1,5 @@
 var CONNECTED = 'CONNECTED';
+var AVATAR_READY = 'AVATAR_READY';
 var HATCHERY_COMPLETED = 'HATCHERY_COMPLETED';
 var HATCHERY_STARTED = 'HATCHERY_STARTED';
 var REGION_CHANGE = 'REGION_CHANGE';
@@ -37,6 +38,13 @@ function processEvent(event) {
     case HATCHERY_COMPLETED:
       if (event.msg.avatar && typeof trackAvatar === 'function') {
         trackAvatar(event.msg.avatar);
+        stopHatcheryEventSource();
+      }
+      return;
+    case AVATAR_READY:
+      if (event.msg.avatar && typeof trackAvatar === 'function') {
+        trackAvatar(event.msg.avatar);
+        stopHatcheryEventSource();
       }
       return;
     case REGION_CHANGE:
@@ -72,9 +80,20 @@ function processEvent(event) {
   }
 }
 
+function stopHatcheryEventSource() {
+  if (HatcheryES !== null) {
+    HatcheryES.close();
+    HatcheryES = null;
+  }
+}
+
 function startHatcheryEventSource() {
   if (HatcheryES == null || HatcheryES.readyState == 2) {
-    HatcheryES = new EventSource('/events/hatchery/eventStream');
+    var streamUrl = '/events/hatchery/eventStream';
+    if (typeof DocentSessionId !== 'undefined' && DocentSessionId) {
+      streamUrl += '?docent=' + encodeURIComponent(DocentSessionId);
+    }
+    HatcheryES = new EventSource(streamUrl);
     HatcheryES.onerror = function(e) {
       if (HatcheryES.readyState == 2) {
         console.log('Hatchery EventSource disconnected, retrying in 3 secs:', e);
